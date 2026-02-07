@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>个人课程表</title>
+    <!-- 引入 Vue 3 (CDN 方式) -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- 引入样式文件 -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+    {% raw %}
+    <div id="app">
+        <header>
+            <h1>📚 个人课程表</h1>
+        </header>
+
+        <main>
+            <!-- 课程表区域 -->
+            <section class="courses-section">
+                <div class="section-header">
+                    <h2>我的课程表</h2>
+                    <button @click="showImportForm = true" class="import-btn">🔄 一键导入课表</button>
+                </div>
+                <div class="schedule-header">
+                    <div class="date-row">
+                        <span class="date-main">{{ todayLabel }}</span>
+                        <span class="week-badge">第{{ currentWeek }}周</span>
+                    </div>
+                    <div class="week-nav">
+                        <button class="week-btn" @click="changeWeek(-1)" :disabled="currentWeek <= 1">‹</button>
+                        <span class="week-title">第{{ currentWeek }}周</span>
+                        <button class="week-btn" @click="changeWeek(1)" :disabled="currentWeek >= totalWeeks">›</button>
+                    </div>
+                </div>
+
+                <div class="timetable" @touchstart="onTouchStart" @touchend="onTouchEnd">
+                    <div class="timetable-grid" :style="{ gridTemplateRows: 'auto repeat(' + maxPeriod + ', 60px)' }">
+                        <!-- 左上角空白 -->
+                        <div class="corner-cell"></div>
+                        <!-- 星期头 -->
+                        <div v-for="day in 7" :key="'hdr-' + day" class="day-header">{{ dayNames[day] }}</div>
+
+                        <!-- 逐行渲染 -->
+                        <template v-for="period in maxPeriod" :key="'row-' + period">
+                            <!-- 时间列 -->
+                            <div class="time-cell">
+                                <div class="period-num">{{ period }}</div>
+                                <div class="period-time" v-html="getTimeLabel(period)"></div>
+                            </div>
+
+                            <!-- 每天的格子 -->
+                            <template v-for="day in 7" :key="'c-' + day + '-' + period">
+                                <!-- 被上方课程跨行占据的格子不渲染 -->
+                                <template v-if="!isOccupied(day, period)">
+                                    <div v-if="getCoursesByDayPeriod(day, period).length > 0"
+                                        v-for="course in getCoursesByDayPeriod(day, period)" :key="'blk-' + course.id"
+                                        class="course-block" :style="{
+                                             gridRow: 'span ' + getCourseSpan(course),
+                                             background: getCourseColor(course.course_name).bg,
+                                             color: getCourseColor(course.course_name).text,
+                                             borderLeft: '3px solid ' + getCourseColor(course.course_name).border
+                                         }">
+                                        <button class="course-delete-btn" @click.stop="deleteCourse(course.id)"
+                                            title="删除课程">×</button>
+                                        <div class="course-name">{{ course.course_name }}</div>
+                                        <div class="course-location" v-if="course.location">📍{{ course.location }}
+                                        </div>
+                                        <div class="course-teacher" v-if="course.teacher">{{ course.teacher }}</div>
+                                    </div>
+                                    <div v-else class="day-cell"></div>
+                                </template>
+                            </template>
+                        </template>
+                    </div>
+                </div>
+                <button @click="showAddCourseForm = true" class="add-btn">➕ 添加课程</button>
+            </section>
+
+            <!-- 作业列表区域 -->
+            <section class="assignments-section">
+                <h2>我的作业</h2>
+                <div class="assignment-list">
+                    <p v-if="assignments.length === 0" class="empty-message">暂无作业~</p>
+                    <div v-for="assignment in assignments" :key="assignment.id" class="assignment-card"
+                        :class="{ completed: assignment.is_completed }">
+                        <h3>{{ assignment.assignment_name }}</h3>
+                        <p>📖 课程: {{ assignment.course_name }}</p>
+                        <p>📝 描述: {{ assignment.description ? assignment.description : '无' }}</p>
+                        <p>⏰ 截止: {{ assignment.due_date }}</p>
+                        <div class="assignment-actions">
+                            <button @click="toggleComplete(assignment)" class="toggle-btn">
+                                {{ assignment.is_completed ? '✓ 已完成' : '○ 未完成' }}
+                            </button>
+                            <button @click="deleteAssignment(assignment.id)" class="delete-btn">删除</button>
+                        </div>
+                    </div>
+                </div>
+                <button @click="showAddAssignmentForm = true" class="add-btn">➕ 添加作业</button>
+            </section>
+        </main>
+
+        <!-- 添加课程表单（模态框） -->
+        <div v-if="showAddCourseForm" class="modal">
+            <div class="modal-content">
+                <h2>添加新课程</h2>
+                <form @submit.prevent="addCourse">
+                    <input v-model="newCourse.course_name" type="text" placeholder="课程名称" required>
+                    <input v-model="newCourse.location" type="text" placeholder="上课地点">
+                    <input v-model="newCourse.teacher" type="text" placeholder="任课老师">
+                    <select v-model="newCourse.day_of_week" required>
+                        <option value="">选择星期</option>
+                        <option :value="1">星期一</option>
+                        <option :value="2">星期二</option>
+                        <option :value="3">星期三</option>
+                        <option :value="4">星期四</option>
+                        <option :value="5">星期五</option>
+                        <option :value="6">星期六</option>
+                        <option :value="7">星期日</option>
+                    </select>
+                    <input v-model.number="newCourse.period" type="number" placeholder="第几节课" min="1" required>
+                    <div class="form-actions">
+                        <button type="submit" class="submit-btn">提交</button>
+                        <button type="button" @click="showAddCourseForm = false" class="cancel-btn">取消</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- 添加作业表单（模态框） -->
+        <div v-if="showAddAssignmentForm" class="modal">
+            <div class="modal-content">
+                <h2>添加新作业</h2>
+                <form @submit.prevent="addAssignment">
+                    <input v-model="newAssignment.assignment_name" type="text" placeholder="作业名称" required>
+                    <textarea v-model="newAssignment.description" placeholder="作业描述"></textarea>
+                    <select v-model="newAssignment.course_id" required>
+                        <option value="">选择所属课程</option>
+                        <option v-for="course in courses" :key="course.id" :value="course.id">
+                            {{ course.course_name }}
+                        </option>
+                    </select>
+                    <input v-model="newAssignment.due_date" type="datetime-local" required>
+                    <div class="form-actions">
+                        <button type="submit" class="submit-btn">提交</button>
+                        <button type="button" @click="showAddAssignmentForm = false" class="cancel-btn">取消</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- 导入课表模态框 -->
+        <div v-if="showImportForm" class="modal">
+            <div class="modal-content">
+                <h2>🔄 从教务系统导入课表</h2>
+                <p class="import-hint">请输入你的教务系统学号和密码，系统将自动获取本学期课表。</p>
+                <form @submit.prevent="importSchedule">
+                    <input v-model="importForm.username" type="text" placeholder="学号" required :disabled="importing">
+                    <input v-model="importForm.password" type="password" placeholder="教务系统密码" required
+                        :disabled="importing">
+                    <label class="checkbox-label">
+                        <input type="checkbox" v-model="importForm.clear_old" :disabled="importing">
+                        <span>清空旧课表后导入（适用于新学期换课表）</span>
+                    </label>
+                    <div class="form-actions">
+                        <button type="submit" class="submit-btn" :disabled="importing">
+                            {{ importing ? '⏳ 正在导入中...' : '🚀 开始导入' }}
+                        </button>
+                        <button type="button" @click="showImportForm = false" class="cancel-btn"
+                            :disabled="importing">取消</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endraw %}
+
+    <!-- 引入 Vue 应用脚本 -->
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+
+</html>
