@@ -23,6 +23,7 @@ createApp({
             },
             showImportForm: false,    // 是否显示导入课表模态框
             importing: false,         // 是否正在导入中
+            currentUser: '',          // 当前登录用户名
             importForm: {             // 导入课表表单数据
                 username: '',
                 password: '',
@@ -86,6 +87,69 @@ createApp({
         }
     },
     methods: {
+        async loadCurrentUser() {
+            try {
+                const response = await fetch('/api/me');
+                if (response.status === 401) {
+                    window.location.href = '/login';
+                    return;
+                }
+                const data = await response.json();
+                this.currentUser = data.username || '';
+            } catch (error) {
+                console.error('获取用户信息失败:', error);
+            }
+        },
+
+        async logout() {
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+            } catch (error) {
+                console.error('退出登录失败:', error);
+            } finally {
+                window.location.href = '/login';
+            }
+        },
+
+        async deleteMyAccount() {
+            const ok = confirm('注销后将永久删除当前账号及其课程和作业，确定继续吗？');
+            if (!ok) {
+                return;
+            }
+
+            const password = prompt('请输入当前账号密码以确认注销：');
+            if (password === null) {
+                return;
+            }
+
+            if (!password.trim()) {
+                alert('请输入密码后再试');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/account', {
+                    method: 'DELETE',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ password })
+                });
+
+                const result = await response.json();
+                if (!response.ok) {
+                    alert(result.error || '注销失败，请重试');
+                    return;
+                }
+
+                alert('账号已注销');
+                window.location.href = '/login';
+            } catch (error) {
+                console.error('注销账号失败:', error);
+                alert('注销失败，请检查网络后重试');
+            }
+        },
+
         // 获取星期名称
         getDayName(day) {
             return this.dayNames[day];
@@ -162,6 +226,10 @@ createApp({
         async loadCourses() {
             try {
                 const response = await fetch('/api/courses');
+                if (response.status === 401) {
+                    window.location.href = '/login';
+                    return;
+                }
                 this.courses = await response.json();
             } catch (error) {
                 console.error('加载课程失败:', error);
@@ -173,6 +241,10 @@ createApp({
         async loadAssignments() {
             try {
                 const response = await fetch('/api/assignments');
+                if (response.status === 401) {
+                    window.location.href = '/login';
+                    return;
+                }
                 this.assignments = await response.json();
             } catch (error) {
                 console.error('加载作业失败:', error);
@@ -359,6 +431,7 @@ createApp({
     },
     mounted() {
         // 页面加载时获取数据
+        this.loadCurrentUser();
         this.loadCourses();
         this.loadAssignments();
     }

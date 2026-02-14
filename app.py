@@ -4,9 +4,12 @@ Flask 应用主文件 (app.py)
 这是整个 Web 应用的入口文件
 """
 
-from flask import Flask, render_template, request, jsonify
-from models import db, Course, Assignment
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from models import db, User, Course, Assignment
 from datetime import datetime
+from functools import wraps
+from sqlalchemy import inspect, text
+from werkzeug.security import generate_password_hash, check_password_hash
 import os
 
 # 创建 Flask 应用实例
@@ -28,6 +31,7 @@ app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{database_path}'
 # SQLALCHEMY_TRACK_MODIFICATIONS: 是否追踪对象修改
 # 设为 False 可以节省内存，Flask-SQLAlchemy 官方推荐
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'myscheduler-dev-secret-key')
 
 # 设置 JSON 响应支持中文
 # 不进行 ASCII 编码，直接返回 UTF-8 中文
@@ -35,6 +39,20 @@ app.config['JSON_AS_ASCII'] = False
 
 # 将数据库对象与 Flask 应用绑定
 db.init_app(app)
+
+
+def get_current_user_id():
+    return session.get('user_id')
+
+
+def login_required(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if not get_current_user_id():
+            return jsonify({'error': '请先登录'}), 401
+        return func(*args, **kwargs)
+
+    return wrapper
 
 
 # ========== 路由定义 ==========
@@ -46,10 +64,100 @@ def index():
     访问 http://localhost:5000/ 时会调用这个函数
     返回 templates/index.html 页面
     """
+    if not get_current_user_id():
+        return redirect(url_for('login_page'))
     return render_template('index.html')
 
 
+@app.route('/login')
+def login_page():
+    if get_current_user_id():
+        return redirect(url_for('index'))
+    return render_template('login.html')
+
+
+@app.route('/api/register', methods=['POST'])
+def register():
+    data = request.get_json() or {}
+    username = (data.get('username') or '').strip()
+    password = data.get('password') or ''
+
+    if not username or not password:
+        return jsonify({'error': '用户名和密码不能为空'}), 400
+
+    if len(username) > 50:
+        return jsonify({'error': '用户名长度不能超过 50'}), 400
+
+    if User.query.count() >= 5:
+        return jsonify({'error': '当前系统最多支持 5 个账号'}), 400
+
+    if User.query.filter_by(username=username).first():
+        return jsonify({'error': '用户名已存在'}), 400
+
+    user = User(
+        username=username,
+        password_hash=generate_password_hash(password)
+    )
+    db.session.add(user)
+    db.session.commit()
+
+    return jsonify({'message': '注册成功，请登录'}), 201
+
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    data = request.get_json() or {}
+    username = (data.get('username') or '').strip()
+    password = data.get('password') or ''
+
+    user = User.query.filter_by(username=username).first()
+    if not user or not check_password_hash(user.password_hash, password):
+        return jsonify({'error': '用户名或密码错误'}), 401
+
+    session['user_id'] = user.id
+    session['username'] = user.username
+    return jsonify({'message': '登录成功', 'username': user.username})
+
+
+@app.route('/api/logout', methods=['POST'])
+@login_required
+def logout():
+    session.clear()
+    return jsonify({'message': '已退出登录'})
+
+
+@app.route('/api/account', methods=['DELETE'])
+@login_required
+def delete_my_account():
+    data = request.get_json() or {}
+    password = data.get('password') or ''
+
+    if not password:
+        return jsonify({'error': '请输入当前密码确认注销'}), 400
+
+    user_id = get_current_user_id()
+    user = User.query.get_or_404(user_id)
+
+    if not check_password_hash(user.password_hash, password):
+        return jsonify({'error': '密码错误，无法注销账号'}), 401
+
+    db.session.delete(user)
+    db.session.commit()
+    session.clear()
+    return jsonify({'message': '账号已注销'})
+
+
+@app.route('/api/me', methods=['GET'])
+@login_required
+def me():
+    return jsonify({
+        'user_id': session.get('user_id'),
+        'username': session.get('username')
+    })
+
+
 @app.route('/api/courses', methods=['GET', 'POST'])
+@login_required
 def courses():
     """
     课程 API 路由
@@ -58,7 +166,8 @@ def courses():
     """
     if request.method == 'GET':
         # 查询所有课程，按星期和节次排序
-        all_courses = Course.query.order_by(Course.day_of_week, Course.period).all()
+        current_user_id = get_current_user_id()
+        all_courses = Course.query.filter_by(user_id=current_user_id).order_by(Course.day_of_week, Course.period).all()
         
         # 将课程对象转换为字典列表，方便 JSON 序列化
         courses_list = []
@@ -72,7 +181,8 @@ def courses():
                 'period': course.period,
                 'period_end': course.period_end,
                 'start_week': course.start_week,
-                'end_week': course.end_week
+                'end_week': course.end_week,
+                'user_id': course.user_id
             })
         
         # 返回 JSON 格式的响应
@@ -81,6 +191,7 @@ def courses():
     elif request.method == 'POST':
         # 获取前端发送的 JSON 数据
         data = request.get_json()
+        current_user_id = get_current_user_id()
         
         # 创建新课程对象
         new_course = Course(
@@ -91,7 +202,8 @@ def courses():
             period=data['period'],
             period_end=data.get('period_end', data['period']),
             start_week=data.get('start_week', 1),
-            end_week=data.get('end_week', 20)
+            end_week=data.get('end_week', 20),
+            user_id=current_user_id
         )
         
         # 添加到数据库会话并提交
@@ -102,18 +214,21 @@ def courses():
 
 
 @app.route('/api/courses/<int:course_id>', methods=['DELETE'])
+@login_required
 def delete_course(course_id):
     """
     删除课程 API
     DELETE: 删除指定 ID 的课程
     """
-    course = Course.query.get_or_404(course_id)
+    current_user_id = get_current_user_id()
+    course = Course.query.filter_by(id=course_id, user_id=current_user_id).first_or_404()
     db.session.delete(course)
     db.session.commit()
     return jsonify({'message': '课程删除成功'})
 
 
 @app.route('/api/assignments', methods=['GET', 'POST'])
+@login_required
 def assignments():
     """
     作业 API 路由
@@ -122,7 +237,8 @@ def assignments():
     """
     if request.method == 'GET':
         # 查询所有作业，按截止日期排序
-        all_assignments = Assignment.query.order_by(Assignment.due_date).all()
+        current_user_id = get_current_user_id()
+        all_assignments = Assignment.query.filter_by(user_id=current_user_id).order_by(Assignment.due_date).all()
         
         assignments_list = []
         for assignment in all_assignments:
@@ -133,6 +249,7 @@ def assignments():
                 'due_date': assignment.due_date.strftime('%Y-%m-%d %H:%M'),
                 'is_completed': assignment.is_completed,
                 'course_id': assignment.course_id,
+                'user_id': assignment.user_id,
                 'course_name': assignment.course.course_name  # 通过外键关系获取课程名
             })
         
@@ -140,6 +257,11 @@ def assignments():
     
     elif request.method == 'POST':
         data = request.get_json()
+        current_user_id = get_current_user_id()
+
+        course = Course.query.filter_by(id=data['course_id'], user_id=current_user_id).first()
+        if not course:
+            return jsonify({'error': '课程不存在或无权限'}), 404
         
         # 将字符串格式的日期转换为 datetime 对象
         due_date = datetime.strptime(data['due_date'], '%Y-%m-%dT%H:%M')
@@ -149,7 +271,8 @@ def assignments():
             description=data.get('description', ''),
             due_date=due_date,
             is_completed=False,
-            course_id=data['course_id']
+            course_id=data['course_id'],
+            user_id=current_user_id
         )
         
         db.session.add(new_assignment)
@@ -159,13 +282,15 @@ def assignments():
 
 
 @app.route('/api/assignments/<int:assignment_id>', methods=['PUT', 'DELETE'])
+@login_required
 def assignment_detail(assignment_id):
     """
     作业详情 API
     PUT: 更新作业（主要用于标记完成状态）
     DELETE: 删除作业
     """
-    assignment = Assignment.query.get_or_404(assignment_id)
+    current_user_id = get_current_user_id()
+    assignment = Assignment.query.filter_by(id=assignment_id, user_id=current_user_id).first_or_404()
     
     if request.method == 'PUT':
         data = request.get_json()
@@ -180,6 +305,7 @@ def assignment_detail(assignment_id):
 
 
 @app.route('/api/import_schedule', methods=['POST'])
+@login_required
 def import_schedule():
     """
     从强智教务系统导入课表 API
@@ -195,6 +321,7 @@ def import_schedule():
             return jsonify({'error': '请提供学号和密码'}), 400
         
         clear_old = data.get('clear_old', False)
+        current_user_id = get_current_user_id()
         
         # 导入爬虫函数
         from utils import import_schedule_from_kingosoft
@@ -205,8 +332,8 @@ def import_schedule():
         # 如果选择清空旧课表，先删除所有已有课程（级联删除关联作业）
         deleted_count = 0
         if clear_old:
-            deleted_count = Course.query.count()
-            Course.query.delete()
+            deleted_count = Course.query.filter_by(user_id=current_user_id).count()
+            Course.query.filter_by(user_id=current_user_id).delete()
             db.session.commit()
         
         # 统计导入结果
@@ -217,6 +344,7 @@ def import_schedule():
         for course_data in courses_data:
             # 检查是否已存在相同的课程（避免重复）
             existing_course = Course.query.filter_by(
+                user_id=current_user_id,
                 course_name=course_data['course_name'],
                 day_of_week=course_data['day_of_week'],
                 period=course_data['period'],
@@ -237,7 +365,8 @@ def import_schedule():
                 period=course_data['period'],
                 period_end=course_data.get('period_end', course_data['period']),
                 start_week=course_data.get('start_week', 1),
-                end_week=course_data.get('end_week', 20)
+                end_week=course_data.get('end_week', 20),
+                user_id=current_user_id
             )
             
             db.session.add(new_course)
@@ -272,6 +401,41 @@ def import_schedule():
 
 # ========== 数据库初始化 ==========
 
+def migrate_legacy_schema():
+    """
+    兼容旧版数据库结构：为已有表补充 user_id 字段
+    """
+    inspector = inspect(db.engine)
+
+    if 'course' in inspector.get_table_names():
+        course_columns = [col['name'] for col in inspector.get_columns('course')]
+        if 'user_id' not in course_columns:
+            db.session.execute(text('ALTER TABLE course ADD COLUMN user_id INTEGER'))
+
+    if 'assignment' in inspector.get_table_names():
+        assignment_columns = [col['name'] for col in inspector.get_columns('assignment')]
+        if 'user_id' not in assignment_columns:
+            db.session.execute(text('ALTER TABLE assignment ADD COLUMN user_id INTEGER'))
+
+    db.session.commit()
+
+
+def ensure_default_user():
+    """
+    确保至少存在一个用户，并把旧数据归属到该用户
+    """
+    if User.query.count() == 0:
+        default_user = User(username='user1', password_hash=generate_password_hash('123456'))
+        db.session.add(default_user)
+        db.session.commit()
+
+    first_user = User.query.order_by(User.id).first()
+    if first_user:
+        Course.query.filter(Course.user_id.is_(None)).update({'user_id': first_user.id})
+        Assignment.query.filter(Assignment.user_id.is_(None)).update({'user_id': first_user.id})
+        db.session.commit()
+
+
 def init_database():
     """
     初始化数据库
@@ -280,6 +444,8 @@ def init_database():
     with app.app_context():
         # 创建所有表（如果不存在）
         db.create_all()
+        migrate_legacy_schema()
+        ensure_default_user()
         print('数据库初始化成功！')
 
 

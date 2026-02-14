@@ -514,3 +514,357 @@ form textarea {
         font-size: 1.8rem;
     }
 }
+
+/* ===== 课程表新视觉（按截图重绘，仅改前端样式）===== */
+body {
+    background: #edf1f6;
+    padding: 26px;
+    color: #2f3a49;
+}
+
+#app {
+    max-width: 1500px;
+    margin: 0 auto;
+}
+
+.user-bar {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.user-name {
+    color: #415364;
+    font-size: 0.9rem;
+}
+
+.logout-btn {
+    border: 1px solid #9eb8c9;
+    background: #f6f9fc;
+    color: #415364;
+    padding: 6px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+
+.logout-btn:hover {
+    background: #ebf1f6;
+}
+
+.delete-account-btn {
+    border: 1px solid #e2a6a6;
+    background: #fff5f5;
+    color: #b34545;
+    padding: 6px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+
+.delete-account-btn:hover {
+    background: #ffecec;
+}
+
+.page-header {
+    margin-bottom: 16px;
+}
+
+.page-title {
+    color: #1f2d3d;
+    font-size: 2.9rem;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-shadow: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.title-icon {
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+    display: inline-block;
+    background:
+        linear-gradient(135deg, #80d8ff 0%, #64b5f6 100%) 0 0 / 70% 70% no-repeat,
+        linear-gradient(135deg, #81c784 0%, #66bb6a 100%) 100% 0 / 70% 70% no-repeat,
+        linear-gradient(135deg, #ce93d8 0%, #ab47bc 100%) 100% 100% / 70% 70% no-repeat;
+    box-shadow: 0 2px 8px rgba(100, 181, 246, 0.45);
+}
+
+main {
+    max-width: 100%;
+    grid-template-columns: minmax(0, 3.2fr) minmax(260px, 1fr);
+    gap: 20px;
+}
+
+.courses-section,
+.assignments-section {
+    background: #f3f5f8;
+    border: 1px solid #dde4ec;
+    border-radius: 16px;
+    box-shadow: 0 6px 20px rgba(38, 56, 84, 0.08);
+    padding: 18px 16px;
+}
+
+.courses-section h2,
+.assignments-section h2 {
+    color: #1f2d3d;
+    font-size: 2rem;
+    margin-bottom: 0;
+}
+
+.section-header {
+    margin-bottom: 12px;
+}
+
+.import-btn,
+.add-btn {
+    background: linear-gradient(180deg, #67c6df 0%, #53b3cf 100%);
+    border: 1px solid #4eabc7;
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(82, 179, 207, 0.35);
+}
+
+.import-btn {
+    padding: 7px 16px;
+    font-size: 0.9rem;
+    border-radius: 10px;
+    font-weight: 600;
+}
+
+.import-btn:hover,
+.add-btn:hover {
+    transform: translateY(-1px);
+}
+
+.add-btn {
+    border-radius: 9px;
+    padding: 12px;
+    font-size: 1.5rem;
+    line-height: 1;
+    font-weight: 700;
+}
+
+.schedule-header {
+    margin-bottom: 10px;
+}
+
+.date-main {
+    color: #111827;
+    font-size: 1.95rem;
+    font-weight: 800;
+}
+
+.week-badge {
+    background: #8fd0e5;
+    color: #fff;
+    font-size: 0.8rem;
+    padding: 4px 10px;
+}
+
+.week-nav {
+    gap: 6px;
+}
+
+.week-title {
+    font-size: 1.45rem;
+    color: #2f4052;
+}
+
+.week-btn {
+    width: 30px;
+    height: 30px;
+    background: #6bc1db;
+    color: #fff;
+    border-radius: 8px;
+}
+
+.week-btn:hover {
+    background: #58b4cf;
+}
+
+.timetable {
+    background: #eef2f6;
+    border: 1px solid #dce3ea;
+    border-radius: 12px;
+    padding: 8px;
+}
+
+.timetable-grid {
+    grid-template-columns: 56px repeat(7, minmax(110px, 1fr));
+    gap: 3px;
+    min-width: 930px;
+}
+
+.corner-cell,
+.day-header,
+.time-cell,
+.day-cell,
+.course-block {
+    border-radius: 8px;
+}
+
+.day-header {
+    background: #e5eaf0;
+    color: #293849;
+    font-size: 1.02rem;
+    min-height: 38px;
+}
+
+.time-cell {
+    background: #f4f6f9;
+    border: 1px solid #dfe6ed;
+    color: #6b7280;
+    padding: 2px;
+}
+
+.period-num {
+    color: #2f3b4a;
+    font-size: 0.95rem;
+}
+
+.period-time {
+    font-size: 0.63rem;
+    line-height: 1.18;
+}
+
+.day-cell {
+    background: #f7f9fc;
+    border: 1px solid #dfe6ee;
+    min-height: 56px;
+}
+
+.course-block {
+    padding: 8px 8px 6px;
+    min-height: 56px;
+    border-left-width: 2px !important;
+    box-shadow: 0 2px 5px rgba(59, 79, 104, 0.1);
+}
+
+.course-name {
+    font-size: 0.79rem;
+    font-weight: 700;
+}
+
+.course-location,
+.course-teacher {
+    font-size: 0.69rem;
+    opacity: 0.8;
+}
+
+.course-delete-btn {
+    width: 16px;
+    height: 16px;
+    font-size: 12px;
+    background: rgba(56, 78, 104, 0.28);
+}
+
+.assignments-section {
+    display: flex;
+    flex-direction: column;
+}
+
+.assignment-list {
+    flex: 1;
+    margin: 12px 0 16px;
+    border: 1px solid #dde4ec;
+    background: #f7f9fb;
+    border-radius: 12px;
+    padding: 10px;
+}
+
+.empty-message {
+    color: #9aa3ad;
+    font-size: 1.15rem;
+    padding: 46px 10px;
+}
+
+.assignment-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-left: 3px solid #6bc1db;
+    margin-bottom: 10px;
+}
+
+.assignment-actions .toggle-btn {
+    background: #66c2dc;
+}
+
+.assignment-actions .delete-btn {
+    background: #ef6f6c;
+}
+
+.modal {
+    background: rgba(22, 33, 48, 0.5);
+}
+
+.modal-content {
+    border-radius: 14px;
+    border: 1px solid #dbe3eb;
+    box-shadow: 0 10px 28px rgba(21, 34, 50, 0.2);
+}
+
+.modal-content h2 {
+    color: #213347;
+}
+
+form input,
+form select,
+form textarea {
+    border-color: #d7e0e8;
+    border-radius: 9px;
+}
+
+form input:focus,
+form select:focus,
+form textarea:focus {
+    border-color: #68c5de;
+}
+
+.submit-btn {
+    background: linear-gradient(180deg, #67c6df 0%, #53b3cf 100%);
+}
+
+.cancel-btn {
+    background: #8c97a4;
+}
+
+@media (max-width: 1024px) {
+    .page-title {
+        font-size: 2.3rem;
+    }
+
+    main {
+        grid-template-columns: 1fr;
+    }
+
+    .assignment-list {
+        min-height: 180px;
+    }
+}
+
+@media (max-width: 768px) {
+    body {
+        padding: 14px;
+    }
+
+    .page-title {
+        font-size: 1.9rem;
+    }
+
+    .schedule-header {
+        gap: 8px;
+    }
+
+    .date-main {
+        font-size: 1.25rem;
+    }
+
+    .week-title {
+        font-size: 1rem;
+    }
+}

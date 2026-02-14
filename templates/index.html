@@ -14,8 +14,16 @@
 <body>
     {% raw %}
     <div id="app">
-        <header>
-            <h1>📚 个人课程表</h1>
+        <div class="user-bar">
+            <span class="user-name" v-if="currentUser">当前用户：{{ currentUser }}</span>
+            <button class="delete-account-btn" @click="deleteMyAccount">注销账户</button>
+            <button class="logout-btn" @click="logout">退出登录</button>
+        </div>
+        <header class="page-header">
+            <h1 class="page-title">
+                <span class="title-icon" aria-hidden="true"></span>
+                <span>个人课程表</span>
+            </h1>
         </header>
 
         <main>

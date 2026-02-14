@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>登录 - 个人课程表</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      font-family: 'Microsoft YaHei', 'PingFang SC', Arial, sans-serif;
+      background: #edf1f6;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      color: #243447;
+    }
+
+    .login-card {
+      width: 100%;
+      max-width: 420px;
+      background: #f3f5f8;
+      border: 1px solid #dde4ec;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 8px 22px rgba(38, 56, 84, 0.1);
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 18px;
+      font-size: 1.9rem;
+      color: #1f2d3d;
+    }
+
+    .tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .tab-btn {
+      border: 1px solid #c8d5e1;
+      background: #fff;
+      color: #4a5d72;
+      border-radius: 9px;
+      padding: 9px;
+      cursor: pointer;
+    }
+
+    .tab-btn.active {
+      background: linear-gradient(180deg, #67c6df 0%, #53b3cf 100%);
+      color: #fff;
+      border-color: #53b3cf;
+    }
+
+    .hint {
+      font-size: 0.86rem;
+      color: #748190;
+      margin-bottom: 10px;
+      text-align: center;
+    }
+
+    input {
+      width: 100%;
+      padding: 11px 12px;
+      border: 1px solid #d0dbe6;
+      border-radius: 9px;
+      margin-bottom: 10px;
+      background: #fff;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: #68c5de;
+    }
+
+    .submit-btn {
+      width: 100%;
+      border: none;
+      border-radius: 9px;
+      padding: 11px;
+      color: #fff;
+      cursor: pointer;
+      background: linear-gradient(180deg, #67c6df 0%, #53b3cf 100%);
+      font-size: 1rem;
+      margin-top: 2px;
+    }
+
+    .message {
+      min-height: 20px;
+      margin-top: 10px;
+      text-align: center;
+      font-size: 0.9rem;
+    }
+
+    .message.error {
+      color: #d94f4f;
+    }
+
+    .message.success {
+      color: #2f8f4e;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="login-card">
+    <h1>个人课程表</h1>
+    <div class="tabs">
+      <button class="tab-btn active" id="loginTab">登录</button>
+      <button class="tab-btn" id="registerTab">注册</button>
+    </div>
+    <p class="hint" id="hintText">已有账号请直接登录</p>
+
+    <form id="authForm">
+      <input id="username" type="text" placeholder="用户名" maxlength="50" required>
+      <input id="password" type="password" placeholder="密码" required>
+      <button class="submit-btn" type="submit" id="submitBtn">登录</button>
+    </form>
+
+    <p class="message" id="message"></p>
+  </div>
+
+  <script>
+    const loginTab = document.getElementById('loginTab');
+    const registerTab = document.getElementById('registerTab');
+    const hintText = document.getElementById('hintText');
+    const submitBtn = document.getElementById('submitBtn');
+    const authForm = document.getElementById('authForm');
+    const messageEl = document.getElementById('message');
+
+    let mode = 'login';
+
+    function setMode(nextMode) {
+      mode = nextMode;
+      const isLogin = mode === 'login';
+      loginTab.classList.toggle('active', isLogin);
+      registerTab.classList.toggle('active', !isLogin);
+      submitBtn.textContent = isLogin ? '登录' : '注册';
+      hintText.textContent = isLogin ? '已有账号请直接登录' : '最多可注册 5 个账号';
+      messageEl.textContent = '';
+      messageEl.className = 'message';
+    }
+
+    loginTab.addEventListener('click', () => setMode('login'));
+    registerTab.addEventListener('click', () => setMode('register'));
+
+    authForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+
+      if (!username || !password) {
+        messageEl.textContent = '用户名和密码不能为空';
+        messageEl.className = 'message error';
+        return;
+      }
+
+      const endpoint = mode === 'login' ? '/api/login' : '/api/register';
+
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          messageEl.textContent = result.error || '操作失败';
+          messageEl.className = 'message error';
+          return;
+        }
+
+        if (mode === 'register') {
+          messageEl.textContent = '注册成功，请登录';
+          messageEl.className = 'message success';
+          setMode('login');
+        } else {
+          window.location.href = '/';
+        }
+      } catch (error) {
+        messageEl.textContent = '网络异常，请稍后重试';
+        messageEl.className = 'message error';
+      }
+    });
+  </script>
+</body>
+
+</html>
