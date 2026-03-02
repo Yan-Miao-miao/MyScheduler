@@ -88,8 +88,8 @@ def register():
     if len(username) > 50:
         return jsonify({'error': '用户名长度不能超过 50'}), 400
 
-    if User.query.count() >= 5:
-        return jsonify({'error': '当前系统最多支持 5 个账号'}), 400
+    if User.query.count() >= 20:
+        return jsonify({'error': '当前系统最多支持 20 个账号'}), 400
 
     if User.query.filter_by(username=username).first():
         return jsonify({'error': '用户名已存在'}), 400
