@@ -1,381 +1,165 @@
 # -*- coding: utf-8 -*-
 """
-强智教务系统爬虫工具类 (utils.py)
-用于自动登录教务系统并获取课表数据
+树维教务系统爬虫工具类 (utils.py)
+用于自动登录新教务系统并获取课表JSON数据
 """
 
 import requests
-import base64
-from bs4 import BeautifulSoup
+import hashlib
 import re
 
-
-class KingosoftCrawler:
+class EAMSCrawler:
     """
-    强智教务系统爬虫类
-    支持登录和课表数据抓取
+    树维教务系统爬虫类
+    支持 SHA1 盐值加密登录和 JSON 课表数据抓取
     """
-    
-    def __init__(self, base_url="http://jw.cupk.edu.cn"):
-        """
-        初始化爬虫
-        
-        参数:
-            base_url: 教务系统的基础 URL
-        """
+    def __init__(self, base_url="https://eams.cupk.edu.cn"):
         self.base_url = base_url
         self.session = requests.Session()
-        # 设置请求头，模拟浏览器
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
         })
-    
-    @staticmethod
-    def encode_credentials(username, password):
-        """
-        生成强智系统的加密登录字符串
         
-        强智系统的加密逻辑：
-        encoded = base64(username) + "%%%" + base64(password)
-        
-        参数:
-            username: 学号
-            password: 密码
-        
-        返回:
-            加密后的字符串
-        """
-        # 将用户名和密码分别进行 Base64 编码
-        username_encoded = base64.b64encode(username.encode()).decode()
-        password_encoded = base64.b64encode(password.encode()).decode()
-        
-        # 用 %%% 连接
-        encoded_str = f"{username_encoded}%%%{password_encoded}"
-        
-        return encoded_str
-    
     def login(self, username, password):
-        """
-        登录强智教务系统
-        
-        参数:
-            username: 学号
-            password: 密码
-        
-        返回:
-            True: 登录成功
-            False: 登录失败
-        
-        异常:
-            Exception: 登录失败时抛出异常，包含错误信息
-        """
-        # 生成加密字符串
-        encoded = self.encode_credentials(username, password)
-        
-        # 登录 URL
-        login_url = f"{self.base_url}/jsxsd/xk/LoginToXk"
-        
-        # 构造 POST 数据
-        payload = {
-            'encoded': encoded
-        }
-        
         try:
-            # 发送登录请求
-            response = self.session.post(login_url, data=payload, timeout=10)
-            response.encoding = 'utf-8'
+            # 1. 获取动态盐值 (Salt)
+            salt_url = f"{self.base_url}/student/login-salt"
+            salt_response = self.session.get(salt_url, timeout=5)
+            salt = salt_response.text.strip()
             
-            # 检查是否登录成功
-            # 如果返回的页面包含错误信息，说明登录失败
-            if '用户名或密码错误' in response.text or '登录失败' in response.text:
-                raise Exception('用户名或密码错误，请检查学号和密码')
+            # 2. 模拟前端 JS 进行 SHA1 加密
+            str_to_hash = f"{salt}-{password}"
+            encrypted_password = hashlib.sha1(str_to_hash.encode('utf-8')).hexdigest()
             
-            # 如果页面跳转到登录页面，也说明登录失败
-            if 'login' in response.url.lower() or 'xk/LoginToXk' in response.url:
-                raise Exception('登录失败，请检查学号和密码')
-            
-            # 登录成功
-            return True
-            
-        except requests.exceptions.Timeout:
-            raise Exception('连接教务系统超时，请检查网络连接')
-        except requests.exceptions.RequestException as e:
-            raise Exception(f'网络请求失败: {str(e)}')
-    
-    def get_schedule(self):
-        """
-        获取课表数据
-        
-        返回:
-            课程列表，每个课程是一个字典：
-            {
-                'course_name': '课程名称',
-                'teacher': '教师',
-                'location': '地点',
-                'day_of_week': 1-7 (周一到周日),
-                'period': 第几节课
+            # 3. 发送登录请求 (使用 json 发送数据)
+            login_url = f"{self.base_url}/student/login"
+            login_data = {
+                'username': username,
+                'password': encrypted_password,
+                'captchaToken': ''
             }
-        
-        异常:
-            Exception: 获取课表失败时抛出异常
-        """
-        # 课表页面 URL
-        schedule_url = f"{self.base_url}/jsxsd/xskb/xskb_list.do"
-        
-        try:
-            # 获取课表页面
-            response = self.session.get(schedule_url, timeout=10)
-            response.encoding = 'utf-8'
             
-            # 检查是否需要重新登录
-            if 'login' in response.url.lower():
-                raise Exception('登录状态已失效，请重新登录')
+            response = self.session.post(login_url, json=login_data, allow_redirects=False, timeout=5)
             
-            # 解析 HTML
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # 查找课表表格
-            # 强智系统的课表通常在 id="kbtable" 的表格中
-            table = soup.find('table', {'id': 'kbtable'}) or soup.find('table', class_='kbcontent')
-            
-            if not table:
-                raise Exception('未找到课表数据，请检查课表页面 URL 是否正确')
-            
-            # 解析课表
-            courses = self._parse_schedule_table(table)
-            
-            return courses
-            
+            # 检查登录结果
+            if response.status_code == 200 and '"result":true' in response.text.replace(' ', ''):
+                return True
+            elif response.status_code == 302 or 'student/home' in response.headers.get('Location', ''):
+                return True
+            else:
+                raise Exception('用户名或密码错误，请检查学号和密码')
+                
         except requests.exceptions.Timeout:
-            raise Exception('获取课表超时，请检查网络连接')
-        except requests.exceptions.RequestException as e:
-            raise Exception(f'获取课表失败: {str(e)}')
-    
-    def _parse_schedule_table(self, table):
-        """
-        解析课表 HTML 表格（矩阵占位法，正确处理 rowspan 连堂课）
-        
-        教务系统表格结构：
-        - 行标签如 0102, 030405, 0607, 0809, 1011 代表节次分组
-        - 每个单元格可能包含多门课（用 --- 分隔）
-        - 课程文本格式：课程名 / 老师 / 周次(周)[节次] / 教室 / 课程代码
-        
-        参数:
-            table: BeautifulSoup 的 table 对象
-        
-        返回:
-            课程列表
-        """
+            raise Exception('连接教务系统超时，请检查网络')
+        except Exception as e:
+            if '用户名或密码错误' in str(e):
+                raise e
+            raise Exception(f'登录请求失败: {str(e)}')
+
+    def get_schedule(self):
+        try:
+            # 1. 访问课表主页，尝试动态获取 semesterId 和 dataId
+            page_url = f"{self.base_url}/student/for-std/course-table"
+            page_res = self.session.get(page_url, timeout=5)
+            
+            # 兜底默认值 (基于你抓包到的真实参数)
+            semester_id = "61" 
+            data_id = "6822"
+            
+            # 正则提取动态 ID
+            sem_match = re.search(r'semesterId[=:]\s*["\']?(\d+)["\']?', page_res.text)
+            if sem_match:
+                semester_id = sem_match.group(1)
+                
+            data_match = re.search(r'["\']?dataId["\']?\s*[:,=]\s*["\']?(\d+)["\']?', page_res.text)
+            if data_match:
+                data_id = data_match.group(1)
+            
+            # 2. 拼接真实数据接口并获取 JSON
+            data_url = f"{self.base_url}/student/for-std/course-table/get-data?semesterId={semester_id}&dataId={data_id}&bizTypeId=2"
+            response = self.session.get(data_url, timeout=5)
+            schedule_data = response.json()
+            
+            # 3. 解析并返回
+            return self._parse_json_schedule(schedule_data)
+
+        except requests.exceptions.Timeout:
+            raise Exception('获取课表超时，请检查网络')
+        except Exception as e:
+            raise Exception(f'获取课表数据失败: {str(e)}')
+
+    def _parse_json_schedule(self, data):
+        """解析返回的 JSON 课表数据"""
         courses = []
+        lessons = data.get("lessons", [])
+        day_map = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '日': 7, '天': 7}
         
-        # 获取所有行（跳过表头）
-        rows = table.find_all('tr')[1:]  # 第一行通常是表头
-        
-        if not rows:
-            return courses
-        
-        num_rows = len(rows)
-        num_cols = 8  # 第0列是时间列，第1-7列是周一到周日
-        
-        # ========== 步骤1：初始化占位矩阵 ==========
-        filled_matrix = [[None for _ in range(num_cols)] for _ in range(num_rows)]
-        
-        # ========== 步骤2：遍历所有行，填充矩阵 ==========
-        for row_idx, row in enumerate(rows):
-            # 同时查找 td 和 th（教务系统的"节次"列用的是 <th>，课程列用 <td>）
-            cells = row.find_all(['td', 'th'])
-            cell_pointer = 0
+        for lesson in lessons:
+            course_name = lesson.get("course", {}).get("nameZh", "未知课程")
             
-            for col_idx in range(num_cols):
-                if cell_pointer >= len(cells):
-                    break
+            # 兜底：获取老师姓名
+            fallback_teacher = ""
+            teachers = lesson.get("teacherAssignmentList", [])
+            if teachers:
+                fallback_teacher = teachers[0].get("person", {}).get("nameZh", "")
                 
-                if filled_matrix[row_idx][col_idx] is not None:
+            schedule_text = lesson.get("scheduleText", {})
+            if not schedule_text:
+                continue
+                
+            dt_place_person_dict = schedule_text.get("dateTimePlacePersonText", {})
+            if not dt_place_person_dict:
+                continue
+                
+            dt_place_person = dt_place_person_dict.get("textZh", "") or dt_place_person_dict.get("text", "")
+            if not dt_place_person:
+                continue
+                
+            # 可能包含多个上课时间段，用分号分隔
+            sessions = dt_place_person.split(";")
+            for session_str in sessions:
+                session_str = session_str.strip()
+                if not session_str:
                     continue
-                
-                cell = cells[cell_pointer]
-                cell_pointer += 1
-                
-                rowspan = int(cell.get('rowspan', 1))
-                colspan = int(cell.get('colspan', 1))
-                
-                for dr in range(rowspan):
-                    for dc in range(colspan):
-                        r = row_idx + dr
-                        c = col_idx + dc
-                        if r < num_rows and c < num_cols:
-                            filled_matrix[r][c] = cell
-        
-        # ========== 步骤3：从矩阵中提取课程数据 ==========
-        processed_cells = set()
-        
-        for row_idx in range(num_rows):
-            for col_idx in range(1, num_cols):  # 跳过第0列（时间列）
-                cell = filled_matrix[row_idx][col_idx]
-                
-                if cell is None:
-                    continue
-                
-                cell_id = id(cell)
-                if cell_id in processed_cells:
-                    continue
-                processed_cells.add(cell_id)
-                
-                # 获取单元格的完整 HTML 内容用于分割多门课
-                day_of_week = col_idx  # 1-7 代表周一到周日
-                
-                # 检查 kbcontent div
-                course_divs = cell.find_all('div', class_='kbcontent')
-                if not course_divs:
-                    course_divs = cell.find_all('div')
-                
-                for course_div in course_divs:
-                    # 获取 div 的内部 HTML，用于按 --- 分割多门课
-                    inner_html = course_div.decode_contents()
                     
-                    # 按 "-----" 分割同一格内的多门课（至少3个连续短横线）
-                    course_blocks = re.split(r'-{3,}', inner_html)
+                # 关键正则解析 (例如："1~10周 星期一 4~5节 克拉玛依校区 C4楼413 郑顾平")
+                match = re.search(r'(\d+)(?:~(\d+))?周\s+星期([一二三四五六日天])\s+(\d+)(?:~(\d+))?节\s+(.*)', session_str)
+                if match:
+                    start_week = int(match.group(1))
+                    end_week = int(match.group(2)) if match.group(2) else start_week
+                    day_of_week = day_map.get(match.group(3), 1)
+                    period = int(match.group(4))
+                    period_end = int(match.group(5)) if match.group(5) else period
                     
-                    for block in course_blocks:
-                        block_text = BeautifulSoup(block, 'html.parser').get_text('\n', strip=True)
+                    # 解析地点和老师 (以最后一个空格分割)
+                    rest = match.group(6).strip()
+                    parts = rest.rsplit(' ', 1)
+                    
+                    if len(parts) == 2:
+                        location = parts[0]
+                        teacher = parts[1]
+                    else:
+                        location = rest
+                        teacher = fallback_teacher
                         
-                        if not block_text or not block_text.strip():
-                            continue
-                        
-                        course_info = self._parse_course_info(block_text)
-                        
-                        if course_info:
-                            course_info['day_of_week'] = day_of_week
-                            courses.append(course_info)
-        
+                    courses.append({
+                        'course_name': course_name,
+                        'teacher': teacher,
+                        'location': location,
+                        'start_week': start_week,
+                        'end_week': end_week,
+                        'day_of_week': day_of_week,
+                        'period': period,
+                        'period_end': period_end
+                    })
         return courses
-    
-    def _parse_course_info(self, course_text):
-        """
-        解析单个课程的文本信息
-        
-        强智教务系统的课程文本格式（从截图分析）：
-            线性代数
-            梁景伟
-            2-13(周)[01-02节]
-            C5楼区401
-            100616M003-18
-        
-        需要提取：课程名、教师、教室、起始周、结束周、起始节、结束节
-        
-        参数:
-            course_text: 课程文本
-        
-        返回:
-            课程信息字典，或 None
-        """
-        # 按换行符分割，去除空行
-        lines = [line.strip() for line in course_text.split('\n') if line.strip()]
-        
-        if len(lines) < 1:
-            return None
-        
-        course_name = ''
-        teacher = ''
-        location = ''
-        start_week = 1
-        end_week = 20
-        period_start = 1
-        period_end = 2
-        
-        # 正则：匹配周次和节次信息，如 "2-13(周)[01-02节]" 或 "1-16(周)[03-04节]"
-        week_period_pattern = re.compile(
-            r'(\d+)-(\d+)\s*\(周\)\s*\[(\d+)-(\d+)节?\]'
-        )
-        # 也可能是单周格式：如 "1(周)[01-02节]"
-        single_week_pattern = re.compile(
-            r'(\d+)\s*\(周\)\s*\[(\d+)-(\d+)节?\]'
-        )
-        # 课程代码格式：以数字开头，包含字母和数字，如 "100616M003-18"
-        code_pattern = re.compile(r'^\d{4,}[A-Za-z]\w*')
-        
-        found_week_info = False
-        
-        for i, line in enumerate(lines):
-            # 检查是否是周次+节次信息行
-            match = week_period_pattern.search(line)
-            if match:
-                start_week = int(match.group(1))
-                end_week = int(match.group(2))
-                period_start = int(match.group(3))
-                period_end = int(match.group(4))
-                found_week_info = True
-                continue
-            
-            # 检查单周格式
-            match_single = single_week_pattern.search(line)
-            if match_single:
-                start_week = int(match_single.group(1))
-                end_week = int(match_single.group(1))
-                period_start = int(match_single.group(2))
-                period_end = int(match_single.group(3))
-                found_week_info = True
-                continue
-            
-            # 跳过课程代码行（数字+字母开头的编号）
-            if code_pattern.match(line):
-                continue
-            
-            # 跳过"健美操"之类的子类别（如果已经有课程名了）
-            # 第一行通常是课程名
-            if not course_name:
-                course_name = line
-            elif not teacher:
-                teacher = line
-            elif not location:
-                # 地点通常包含楼/馆/房/区/室等关键字
-                if any(kw in line for kw in ['楼', '馆', '房', '区', '室', '场', '实验']):
-                    location = line
-                else:
-                    # 可能是附加信息（如"健美操"），跳过
-                    pass
-        
-        if not course_name:
-            return None
-        
-        # 如果没有找到周次信息，使用默认值
-        if not found_week_info:
-            start_week = 1
-            end_week = 20
-        
-        return {
-            'course_name': course_name,
-            'teacher': teacher,
-            'location': location,
-            'start_week': start_week,
-            'end_week': end_week,
-            'period': period_start,
-            'period_end': period_end
-        }
 
 
 def import_schedule_from_kingosoft(username, password):
     """
-    从强智教务系统导入课表的便捷函数
-    
-    参数:
-        username: 学号
-        password: 密码
-    
-    返回:
-        课程列表
-    
-    异常:
-        Exception: 登录或获取课表失败时抛出异常
+    保持原有函数名不变，让 app.py 能够无缝调用
     """
-    crawler = KingosoftCrawler()
-    
-    # 登录
+    crawler = EAMSCrawler()
     crawler.login(username, password)
-    
-    # 获取课表
-    courses = crawler.get_schedule()
-    
-    return courses
+    return crawler.get_schedule()
