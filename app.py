@@ -16,28 +16,21 @@ import os
 app = Flask(__name__)
 
 # ========== 数据库配置 ==========
-
-# 设置数据库文件路径
-# os.path.abspath: 获取绝对路径
-# os.path.dirname(__file__): 获取当前文件所在目录
-# 数据库文件 scheduler.db 会保存在项目根目录
 basedir = os.path.abspath(os.path.dirname(__file__))
 database_path = os.path.join(basedir, 'scheduler.db')
 
-# SQLALCHEMY_DATABASE_URI: 数据库连接字符串
-# sqlite:/// 表示使用 SQLite 数据库，后面跟数据库文件路径
-app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{database_path}'
+# 优先读取 Zeabur 注入的环境变量 MYSQL_URI，如果没有则回退到本地 SQLite
+db_uri = os.environ.get('MYSQL_URI', f'sqlite:///{database_path}')
 
-# SQLALCHEMY_TRACK_MODIFICATIONS: 是否追踪对象修改
-# 设为 False 可以节省内存，Flask-SQLAlchemy 官方推荐
+# SQLAlchemy 连接 MySQL 需要明确指定 pymysql 驱动
+if db_uri.startswith('mysql://'):
+    db_uri = db_uri.replace('mysql://', 'mysql+pymysql://', 1)
+
+app.config['SQLALCHEMY_DATABASE_URI'] = db_uri
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'myscheduler-dev-secret-key')
-
-# 设置 JSON 响应支持中文
-# 不进行 ASCII 编码，直接返回 UTF-8 中文
 app.config['JSON_AS_ASCII'] = False
 
-# 将数据库对象与 Flask 应用绑定
 db.init_app(app)
 
 
@@ -467,16 +460,9 @@ def init_database():
 
 # ========== 应用启动 ==========
 
+# 无论以何种方式启动（python app.py 或 gunicorn app:app），都初始化数据库
+init_database()
+
 if __name__ == '__main__':
-    # 首次运行时初始化数据库
-    init_database()
-    
-    # 启动 Flask 开发服务器
-    # debug=True: 开启调试模式，代码修改后自动重启
-    # host='0.0.0.0': 允许外部访问
-    # port=5000: 监听 5000 端口
-    # 原来的代码：
-    # app.run(debug=True, host='0.0.0.0', port=5000)
-    # 修改为：
     port = int(os.environ.get("PORT", 5000))
     app.run(debug=False, host='0.0.0.0', port=port)
