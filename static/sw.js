@@ -1,6 +1,5 @@
 const CACHE_NAME = 'myscheduler-v2';
 const STATIC_ASSETS = [
-  '/',
   '/static/style.css',
   '/static/script.js',
   '/static/icon-192.png',
@@ -33,13 +32,15 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
 
+  // 只处理 GET 请求
+  if (event.request.method !== 'GET') return;
+
   // API 请求 → 网络优先，失败时返回缓存
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(
       fetch(event.request)
         .then(response => {
-          // 仅缓存 GET 请求的成功响应
-          if (event.request.method === 'GET' && response.ok) {
+          if (response.ok) {
             const clone = response.clone();
             caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
           }
@@ -50,7 +51,21 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // 静态资源 → 缓存优先，未命中时从网络获取并缓存
+  // HTML 导航请求（页面跳转）→ 网络优先，保证登录状态正确
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .then(response => {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // 静态资源（CSS/JS/图片等）→ 缓存优先，未命中时从网络获取并缓存
   event.respondWith(
     caches.match(event.request).then(cached => {
       if (cached) return cached;
@@ -61,11 +76,6 @@ self.addEventListener('fetch', event => {
         }
         return response;
       });
-    }).catch(() => {
-      // 离线回退：如果是导航请求，返回缓存的首页
-      if (event.request.mode === 'navigate') {
-        return caches.match('/');
-      }
     })
   );
 });
