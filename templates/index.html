@@ -9,6 +9,12 @@
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <!-- 引入样式文件 -->
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#67c6df">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='icon-192.png') }}">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="个人课程表">
 </head>
 
 <body>

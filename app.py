@@ -4,7 +4,7 @@ Flask 应用主文件 (app.py)
 这是整个 Web 应用的入口文件
 """
 
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, send_from_directory
 from models import db, User, Course, Assignment
 from datetime import datetime
 from functools import wraps
@@ -56,6 +56,22 @@ def login_required(func):
 
 
 # ========== 路由定义 ==========
+
+@app.route('/sw.js')
+def service_worker():
+    """从根路径提供 Service Worker，使其作用域覆盖整个站点"""
+    response = send_from_directory(app.static_folder, 'sw.js')
+    response.headers['Content-Type'] = 'application/javascript'
+    response.headers['Service-Worker-Allowed'] = '/'
+    response.headers['Cache-Control'] = 'no-cache'
+    return response
+
+
+@app.route('/manifest.json')
+def manifest():
+    """从根路径提供 manifest.json，提高 PWA 兼容性"""
+    return send_from_directory(app.static_folder, 'manifest.json')
+
 
 @app.route('/')
 def index():

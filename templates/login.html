@@ -5,6 +5,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>登录 - 个人课程表</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#67c6df">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="个人课程表">
+  <link rel="apple-touch-icon" href="/static/icon-192.png">
   <style>
     * {
       margin: 0;
@@ -195,6 +201,11 @@
         messageEl.className = 'message error';
       }
     });
+
+    // 注册 Service Worker
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js', { scope: '/' });
+    }
   </script>
 </body>
 

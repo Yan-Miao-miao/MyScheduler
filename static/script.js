@@ -436,3 +436,16 @@ createApp({
         this.loadAssignments();
     }
 }).mount('#app');
+// 注册 Service Worker 以支持 PWA 离线缓存和安装功能
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        // 从根路径注册 SW，使其作用域覆盖整个站点
+        navigator.serviceWorker.register('/sw.js', { scope: '/' })
+            .then(reg => {
+                console.log('Service Worker 注册成功，作用域为: ', reg.scope);
+            })
+            .catch(err => {
+                console.log('Service Worker 注册失败: ', err);
+            });
+    });
+}
