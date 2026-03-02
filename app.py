@@ -475,4 +475,8 @@ if __name__ == '__main__':
     # debug=True: 开启调试模式，代码修改后自动重启
     # host='0.0.0.0': 允许外部访问
     # port=5000: 监听 5000 端口
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # 原来的代码：
+    # app.run(debug=True, host='0.0.0.0', port=5000)
+    # 修改为：
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=False, host='0.0.0.0', port=port)
