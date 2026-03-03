@@ -3,7 +3,11 @@
 Flask 应用主文件 (app.py)
 这是整个 Web 应用的入口文件
 """
-
+import sys
+print("--- DEBUG INFO ---")
+print("Python Executable:", sys.executable)
+print("Python Path:", sys.path)
+print("--- END DEBUG ---")
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, send_from_directory
 from models import db, User, Course, Assignment
 from datetime import datetime
