@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-树维教务系统爬虫工具类 (utils.py)
-用于自动登录新教务系统并获取课表JSON数据
+工具类 (utils.py)
+包含教务系统爬虫和 PDF 课表解析功能
 """
 
 import requests
@@ -163,3 +163,290 @@ def import_schedule_from_kingosoft(username, password):
     crawler = EAMSCrawler()
     crawler.login(username, password)
     return crawler.get_schedule()
+
+
+# ========== PDF 课表解析 ==========
+
+def _extract_chinese(text):
+    """从交错文本中提取中文字符和中文标点"""
+    return ''.join(re.findall(r'[\u4e00-\u9fff\uff08\uff09（）]', text))
+
+
+def _has_interleaved_pattern(line):
+    """判断一行文本是否为课程名与课程代码交错排列的模式"""
+    line = line.strip()
+    if len(line) < 4:
+        return False
+    transitions = 0
+    prev_is_chinese = None
+    for ch in line:
+        is_chinese = '\u4e00' <= ch <= '\u9fff' or ch in '（）\uff08\uff09'
+        is_alnum = ch.isalnum() and not is_chinese
+        if is_alnum or is_chinese:
+            if prev_is_chinese is not None and is_chinese != prev_is_chinese:
+                transitions += 1
+            prev_is_chinese = is_chinese
+    return transitions >= 4
+
+
+def _extract_course_name_from_text(text):
+    """从包含交错课程名+课程代码的文本块中提取课程名"""
+    lines = text.strip().split('\n')
+    name_parts = []
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        # 跳过班级信息行
+        if any(line.startswith(kw) for kw in [';', '24-', '23-', '22-']):
+            continue
+        if '班' in line and ('工程' in line or '技术' in line or '24-' in line):
+            continue
+        if line in ('周', '节', '楼', '区', '机房', '校区', '克拉玛依'):
+            continue
+
+        # 跳过包含学号的带括号行，如 (2021592210) 或混合ID行
+        cleaned = line.replace(' ', '')
+        if re.match(r'^\([\d\u4e00-\u9fff\s]+\)', cleaned):
+            continue
+
+        # 跳过包含 校区/楼 的位置碎片
+        if ('校' in line and '区' in line) or ('校区' in line):
+            continue
+
+        # 跳过纯位置碎片
+        if re.match(r'^(C\d|I{1,3}|区|楼|\d{3}$)', line):
+            continue
+
+        # 识别交错模式（课程名+课程代码混排）
+        if _has_interleaved_pattern(line):
+            chinese = _extract_chinese(line)
+            if len(chinese) >= 2:
+                if not any(kw in chinese for kw in ['校区', '机房', '克拉玛依']):
+                    name_parts.append(chinese)
+        elif re.match(r'^[A-Za-z]+$', line):
+            # 纯英文单词（如 "Web"）
+            name_parts.append(line)
+        elif re.match(r'^[\u4e00-\u9fff\uff08\uff09（）]+$', line) and len(line) >= 4:
+            # 纯中文行，足够长，可能是课程名片段
+            if not any(kw in line for kw in ['克拉玛依', '校区', '机房', '社会实践']):
+                name_parts.append(line)
+
+    course_name = ''.join(name_parts)
+
+    # 清理
+    course_name = re.sub(r'^(IV|III|II|I)', '', course_name)
+    course_name = re.sub(r'[周节楼区]+$', '', course_name)
+    course_name = re.sub(r'机房$', '', course_name)
+
+    return course_name.strip()
+
+
+def _extract_location(text):
+    """从文本中提取上课地点"""
+    location = ''
+
+    # 先尝试匹配完整的 "C数字 房间号" 在同一行
+    loc_match = re.search(
+        r'(C\d+)\s*(I{1,3}V?|IV|V)?\s*(区)?[\s\n]*?(\d{3})?',
+        text[:300]
+    )
+    if loc_match:
+        loc_parts = [loc_match.group(1) + '楼']
+        if loc_match.group(2):
+            loc_parts.append(loc_match.group(2) + '区')
+        if loc_match.group(4):
+            loc_parts.append(loc_match.group(4))
+        location = ''.join(loc_parts)
+
+    # 如果只匹配到楼号没有房间号，在"周 节 楼"标签行之后搜索三位数房间号
+    if location and not re.search(r'\d{3}', location):
+        # 搜索 "周 节 楼" 之后的数字
+        after_label = re.search(r'周\s*节\s*楼.*?\n\s*(\d{3})', text[:300], re.DOTALL)
+        if after_label:
+            location += after_label.group(1)
+        else:
+            # 单独占一行的三位数
+            room_match = re.search(r'(?:^|\n)\s*(\d{3})\s*(?:\n|$)', text[:300])
+            if room_match:
+                location += room_match.group(1)
+
+    # 处理 "I 303\n区" 这类 I/II区和房间号分离在"周 节 楼"之后的情况
+    if location and '区' not in location:
+        # 检查 "周 节 楼" 后的 "I 303\n区" 模式
+        area_match = re.search(r'周\s*节\s*楼.*?\n\s*(I{1,3}V?|IV|V)\s+(\d{3})', text[:300], re.DOTALL)
+        if area_match:
+            # 重建地点：楼号 + 区域 + 房间号
+            base = re.match(r'(C\d+楼)', location)
+            if base:
+                location = base.group(1) + area_match.group(1) + '区' + area_match.group(2)
+
+    if not location:
+        special = re.search(r'(\d?\s*形体馆|体育馆|操场|实验室)', text[:200])
+        if special:
+            location = special.group(1).replace(' ', '')
+
+    # 检测机房
+    if location and '机房' not in location and '机房' in text[:150]:
+        location += '机房'
+
+    return location
+
+
+def _extract_teacher(text):
+    """从文本中提取教师姓名"""
+    skip_words = {'机房', '校区', '克拉玛依', '社会实践', '形体馆', '体育馆',
+                  '周节', '周节楼', '楼区'}
+    skip_contains = ['工程', '班', '科学', '储运', '勘查', '技术', '思想', '社会',
+                     '克拉', '玛依', '校区']
+
+    def is_valid_name(name):
+        if name in skip_words:
+            return False
+        if any(kw in name for kw in skip_contains):
+            return False
+        return True
+
+    # 方法0 (优先): 拆分在两行的教师名，如 "楼 赵\n联文" → "赵联文"
+    # 中间可能有学号行，如 "楼 赵\n(2024582028)\n联文"
+    split_match = re.search(r'[楼区]\s*([\u4e00-\u9fff])\s*\n(?:\s*\([\d\s]+\)\s*\n)?\s*([\u4e00-\u9fff]{1,3})\s*(?:\n|$)', text[:300])
+    if split_match:
+        combined = split_match.group(1) + split_match.group(2)
+        if len(combined) >= 2 and is_valid_name(combined):
+            return combined
+
+    # 方法1: 独占一行的中文名
+    candidates = re.findall(r'(?:^|\n)\s*([\u4e00-\u9fff]{2,4})\s*(?:\n|$)', text[:300])
+    for candidate in candidates:
+        if is_valid_name(candidate):
+            return candidate
+
+    # 方法2: "机房 教师名" 或 "机房  教师名" 模式
+    jf_match = re.search(r'机房\s+([\u4e00-\u9fff]{2,4})', text[:300])
+    if jf_match and is_valid_name(jf_match.group(1)):
+        return jf_match.group(1)
+
+    # 方法3: ")教师名" 模式
+    id_name_match = re.search(r'\)\s*([\u4e00-\u9fff]{2,4})\s*(?:\n|$)', text[:300])
+    if id_name_match and is_valid_name(id_name_match.group(1)):
+        return id_name_match.group(1)
+
+    # 方法4: "区 教师名" 模式
+    qu_match = re.search(r'区\s+([\u4e00-\u9fff]{2,4})\s*(?:\n|$)', text[:300])
+    if qu_match and is_valid_name(qu_match.group(1)):
+        return qu_match.group(1)
+
+    # 方法5: 从学号+教师名混排中提取，如 "(202机05房92 2 李12张) 美智"
+    # 提取括号内和括号后的所有中文字符
+    paren_match = re.search(r'\([\d\s\u4e00-\u9fff]+\)\s*([\u4e00-\u9fff]*)', text[:300])
+    if paren_match:
+        inside = re.findall(r'[\u4e00-\u9fff]', paren_match.group(0))
+        inside_str = ''.join(inside)
+        # 移除已知非人名词汇
+        inside_str = inside_str.replace('机房', '')
+        if len(inside_str) >= 2 and is_valid_name(inside_str):
+            return inside_str
+
+    return ''
+
+
+def _parse_cell(cell_text):
+    """解析课表表格中的单个单元格，提取所有课程信息"""
+    results = []
+
+    wp_pattern = r'\((\d+)~(\d+)\s*\)\s*\((\d+)-(\d+)\s*\)'
+    matches = list(re.finditer(wp_pattern, cell_text))
+
+    if not matches:
+        return results
+
+    prev_course_name = ''
+    prev_teacher = ''
+
+    for i, match in enumerate(matches):
+        start_week = int(match.group(1))
+        end_week = int(match.group(2))
+        period_start = int(match.group(3))
+        period_end = int(match.group(4))
+
+        # 获取当前匹配之前的文本（可能包含课程名）
+        if i == 0:
+            pre_text = cell_text[:match.start()]
+        else:
+            pre_text = cell_text[matches[i - 1].end():match.start()]
+
+        # 获取当前匹配之后的文本（可能包含地点和教师）
+        if i + 1 < len(matches):
+            post_text = cell_text[match.end():matches[i + 1].start()]
+        else:
+            post_text = cell_text[match.end():]
+
+        # 提取课程名
+        course_name = _extract_course_name_from_text(pre_text)
+        if not course_name or len(course_name) < 2:
+            course_name = prev_course_name
+
+        # 提取地点 — 使用 post_text（包含完整多行），优先用完整文本
+        location = _extract_location(post_text)
+
+        # 提取教师
+        teacher = _extract_teacher(post_text)
+        if not teacher and course_name == prev_course_name:
+            teacher = prev_teacher
+
+        prev_course_name = course_name
+        prev_teacher = teacher if teacher else prev_teacher
+
+        if course_name and len(course_name) >= 2:
+            results.append({
+                'course_name': course_name,
+                'location': location,
+                'teacher': teacher,
+                'start_week': start_week,
+                'end_week': end_week,
+                'period': period_start,
+                'period_end': period_end
+            })
+
+    return results
+
+
+def parse_schedule_pdf(pdf_path):
+    """
+    解析课表 PDF 文件，返回课程列表
+
+    Args:
+        pdf_path: PDF 文件路径
+
+    Returns:
+        list: 课程字典列表，每个字典包含：
+            course_name, location, teacher, day_of_week,
+            period, period_end, start_week, end_week
+    """
+    import pdfplumber
+
+    courses = []
+
+    with pdfplumber.open(pdf_path) as pdf:
+        all_rows = []
+        for page in pdf.pages:
+            tables = page.extract_tables()
+            for table in tables:
+                all_rows.extend(table)
+
+    for row in all_rows:
+        if len(row) < 9:
+            continue
+        for col_idx in range(2, 9):
+            cell = row[col_idx]
+            if not cell or not cell.strip():
+                continue
+            day_of_week = col_idx - 1  # 1=周一, ..., 7=周日
+            cell_courses = _parse_cell(cell)
+            for c in cell_courses:
+                c['day_of_week'] = day_of_week
+                courses.append(c)
+
+    return courses

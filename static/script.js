@@ -23,6 +23,10 @@ createApp({
             },
             showImportForm: false,    // 是否显示导入课表模态框
             importing: false,         // 是否正在导入中
+            showUploadForm: false,    // 是否显示上传PDF模态框
+            uploading: false,         // 是否正在上传解析中
+            selectedPDF: null,        // 选中的PDF文件
+            uploadClearOld: false,    // 上传时是否清空旧课表
             currentUser: '',          // 当前登录用户名
             importForm: {             // 导入课表表单数据
                 username: '',
@@ -386,6 +390,65 @@ createApp({
             } catch (error) {
                 console.error('删除作业失败:', error);
                 alert('删除作业失败，请重试');
+            }
+        },
+
+        // PDF 文件选择
+        onPDFSelected(event) {
+            const file = event.target.files[0];
+            if (file && file.type === 'application/pdf') {
+                this.selectedPDF = file;
+            } else if (file) {
+                alert('请选择 PDF 格式的文件');
+                event.target.value = '';
+            }
+        },
+
+        // PDF 拖拽放置
+        onDropPDF(event) {
+            const file = event.dataTransfer.files[0];
+            if (file && file.type === 'application/pdf') {
+                this.selectedPDF = file;
+            } else {
+                alert('请拖入 PDF 格式的文件');
+            }
+        },
+
+        // 上传 PDF 课表
+        async uploadSchedulePDF() {
+            if (!this.selectedPDF) {
+                alert('请先选择 PDF 文件');
+                return;
+            }
+
+            this.uploading = true;
+
+            try {
+                const formData = new FormData();
+                formData.append('file', this.selectedPDF);
+                formData.append('clear_old', this.uploadClearOld);
+
+                const response = await fetch('/api/upload_schedule', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    alert(result.message);
+                    this.showUploadForm = false;
+                    this.selectedPDF = null;
+                    this.uploadClearOld = false;
+                    await this.loadCourses();
+                } else {
+                    alert('导入失败：' + (result.error || '未知错误'));
+                }
+            } catch (error) {
+                console.error('上传PDF课表失败:', error);
+                alert('上传失败，请检查网络连接后重试');
+            } finally {
+                this.uploading = false;
             }
         },
 

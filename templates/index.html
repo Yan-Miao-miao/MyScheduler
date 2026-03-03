@@ -37,7 +37,10 @@
             <section class="courses-section">
                 <div class="section-header">
                     <h2>我的课程表</h2>
-                    <button @click="showImportForm = true" class="import-btn">🔄 一键导入课表</button>
+                    <div class="import-btn-group">
+                        <button @click="showImportForm = true" class="import-btn">🔄 一键导入</button>
+                        <button @click="showUploadForm = true" class="import-btn">📄 上传PDF</button>
+                    </div>
                 </div>
                 <div class="schedule-header">
                     <div class="date-row">
@@ -161,6 +164,41 @@
                     <div class="form-actions">
                         <button type="submit" class="submit-btn">提交</button>
                         <button type="button" @click="showAddAssignmentForm = false" class="cancel-btn">取消</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- 上传PDF课表模态框 -->
+        <div v-if="showUploadForm" class="modal">
+            <div class="modal-content">
+                <h2>📄 上传 PDF 课表</h2>
+                <p class="import-hint">请选择从教务系统导出的课表 PDF 文件，系统将自动识别并导入课程。</p>
+                <form @submit.prevent="uploadSchedulePDF">
+                    <div class="file-upload-area" @click="$refs.pdfInput.click()" @dragover.prevent
+                        @drop.prevent="onDropPDF">
+                        <input ref="pdfInput" type="file" accept=".pdf" @change="onPDFSelected" style="display:none"
+                            :disabled="uploading">
+                        <div v-if="!selectedPDF" class="file-upload-placeholder">
+                            <span style="font-size:2em">📁</span>
+                            <p>点击选择或拖拽 PDF 文件到此处</p>
+                        </div>
+                        <div v-else class="file-upload-selected">
+                            <span>📄 {{ selectedPDF.name }}</span>
+                            <span style="color:#888;margin-left:8px">({{ (selectedPDF.size / 1024).toFixed(1) }}
+                                KB)</span>
+                        </div>
+                    </div>
+                    <label class="checkbox-label">
+                        <input type="checkbox" v-model="uploadClearOld" :disabled="uploading">
+                        <span>清空旧课表后导入（适用于新学期换课表）</span>
+                    </label>
+                    <div class="form-actions">
+                        <button type="submit" class="submit-btn" :disabled="uploading || !selectedPDF">
+                            {{ uploading ? '⏳ 正在解析中...' : '🚀 开始导入' }}
+                        </button>
+                        <button type="button" @click="showUploadForm = false; selectedPDF = null" class="cancel-btn"
+                            :disabled="uploading">取消</button>
                     </div>
                 </form>
             </div>

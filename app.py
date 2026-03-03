@@ -10,7 +10,9 @@ from datetime import datetime
 from functools import wraps
 from sqlalchemy import inspect, text
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
 import os
+import tempfile
 
 # 创建 Flask 应用实例
 app = Flask(__name__)
@@ -405,6 +407,100 @@ def import_schedule():
             return jsonify({'error': error_message}), 401
         else:
             return jsonify({'error': f'导入失败: {error_message}'}), 500
+
+
+@app.route('/api/upload_schedule', methods=['POST'])
+@login_required
+def upload_schedule():
+    """
+    上传 PDF 课表文件并解析导入
+    POST: 接收 PDF 文件，解析其中的课表数据并导入数据库
+    """
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': '请选择要上传的 PDF 文件'}), 400
+
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': '请选择要上传的 PDF 文件'}), 400
+
+        if not file.filename.lower().endswith('.pdf'):
+            return jsonify({'error': '仅支持 PDF 格式文件'}), 400
+
+        clear_old = request.form.get('clear_old', 'false').lower() == 'true'
+        current_user_id = get_current_user_id()
+
+        # 保存上传的文件到临时目录
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+            file.save(tmp)
+            tmp_path = tmp.name
+
+        try:
+            # 解析 PDF 课表
+            from utils import parse_schedule_pdf
+            courses_data = parse_schedule_pdf(tmp_path)
+        finally:
+            # 确保临时文件被删除
+            os.unlink(tmp_path)
+
+        if not courses_data:
+            return jsonify({'error': 'PDF 中未识别到课程信息，请确认文件格式正确'}), 400
+
+        # 如果选择清空旧课表
+        deleted_count = 0
+        if clear_old:
+            deleted_count = Course.query.filter_by(user_id=current_user_id).count()
+            Course.query.filter_by(user_id=current_user_id).delete()
+            db.session.commit()
+
+        # 导入课程
+        imported_count = 0
+        skipped_count = 0
+
+        for course_data in courses_data:
+            # 检查重复
+            existing = Course.query.filter_by(
+                user_id=current_user_id,
+                course_name=course_data['course_name'],
+                day_of_week=course_data['day_of_week'],
+                period=course_data['period'],
+                start_week=course_data.get('start_week', 1)
+            ).first()
+
+            if existing:
+                skipped_count += 1
+                continue
+
+            new_course = Course(
+                course_name=course_data['course_name'],
+                teacher=course_data.get('teacher', ''),
+                location=course_data.get('location', ''),
+                day_of_week=course_data['day_of_week'],
+                period=course_data['period'],
+                period_end=course_data.get('period_end', course_data['period']),
+                start_week=course_data.get('start_week', 1),
+                end_week=course_data.get('end_week', 20),
+                user_id=current_user_id
+            )
+            db.session.add(new_course)
+            imported_count += 1
+
+        db.session.commit()
+
+        if clear_old:
+            msg = f'已清空旧课表（{deleted_count} 门），从 PDF 成功导入 {imported_count} 门课程'
+        else:
+            msg = f'PDF 导入成功！新增 {imported_count} 门课程，跳过 {skipped_count} 门重复课程'
+
+        return jsonify({
+            'message': msg,
+            'imported': imported_count,
+            'skipped': skipped_count
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'PDF 解析失败: {str(e)}'}), 500
 
 
 
