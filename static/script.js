@@ -414,6 +414,15 @@ createApp({
             }
         },
 
+        // 关闭上传模态框
+        closeUploadModal() {
+            this.showUploadForm = false;
+            this.selectedPDF = null;
+            if (this.$refs.pdfInput) {
+                this.$refs.pdfInput.value = '';
+            }
+        },
+
         // 上传 PDF 课表
         async uploadSchedulePDF() {
             if (!this.selectedPDF) {

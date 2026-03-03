@@ -197,7 +197,7 @@
                         <button type="submit" class="submit-btn" :disabled="uploading || !selectedPDF">
                             {{ uploading ? '⏳ 正在解析中...' : '🚀 开始导入' }}
                         </button>
-                        <button type="button" @click="showUploadForm = false; selectedPDF = null" class="cancel-btn"
+                        <button type="button" @click="closeUploadModal" class="cancel-btn"
                             :disabled="uploading">取消</button>
                     </div>
                 </form>
