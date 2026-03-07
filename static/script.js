@@ -35,6 +35,11 @@ createApp({
             },
             currentWeek: 1,          // 当前周次
             totalWeeks: 20,          // 学期总周数（可按需调整）
+            firstWeekMonday: {       // 学期第1周周一日期（3/9）
+                year: 2026,
+                month: 3,
+                day: 9
+            },
             touchStartX: 0,          // 触摸起始位置
             dayNames: ['', '一', '二', '三', '四', '五', '六', '日'],
             periodTimes: {
@@ -88,6 +93,24 @@ createApp({
                 const ew = Number(c.end_week) || 20;
                 return this.currentWeek >= sw && this.currentWeek <= ew;
             });
+        },
+        // 当前周一到周日日期（基于第1周周一）
+        weekDateLabels() {
+            const base = new Date(
+                this.firstWeekMonday.year,
+                this.firstWeekMonday.month - 1,
+                this.firstWeekMonday.day
+            );
+            const labels = [''];
+
+            for (let day = 1; day <= 7; day++) {
+                const date = new Date(base);
+                const offset = (this.currentWeek - 1) * 7 + (day - 1);
+                date.setDate(base.getDate() + offset);
+                labels.push(`${date.getMonth() + 1}/${date.getDate()}`);
+            }
+
+            return labels;
         }
     },
     methods: {

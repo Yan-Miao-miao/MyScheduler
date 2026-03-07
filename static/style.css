@@ -719,6 +719,23 @@ main {
     color: #293849;
     font-size: 1.02rem;
     min-height: 38px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 2px;
+    line-height: 1.1;
+}
+
+.day-header-weekday {
+    font-weight: 700;
+}
+
+.day-header-date {
+    margin-top: 2px;
+    font-size: 0.72rem;
+    color: #6b7280;
+    font-weight: 600;
 }
 
 .time-cell {

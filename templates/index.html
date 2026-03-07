@@ -59,7 +59,10 @@
                         <!-- 左上角空白 -->
                         <div class="corner-cell"></div>
                         <!-- 星期头 -->
-                        <div v-for="day in 7" :key="'hdr-' + day" class="day-header">{{ dayNames[day] }}</div>
+                        <div v-for="day in 7" :key="'hdr-' + day" class="day-header">
+                            <span class="day-header-weekday">{{ dayNames[day] }}</span>
+                            <span class="day-header-date">{{ weekDateLabels[day] }}</span>
+                        </div>
 
                         <!-- 逐行渲染 -->
                         <template v-for="period in maxPeriod" :key="'row-' + period">
