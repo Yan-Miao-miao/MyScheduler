@@ -7,6 +7,7 @@
 import requests
 import hashlib
 import re
+from difflib import SequenceMatcher
 
 class EAMSCrawler:
     """
@@ -167,6 +168,89 @@ def import_schedule_from_kingosoft(username, password):
 
 # ========== PDF 课表解析 ==========
 
+# 教师标准名单（可持续补充；不在名单内的姓名会原样保留）
+PDF_TEACHER_STANDARDS = {
+    '王晓伟', '郑顾平', '潘啸晨', '邱洪泽', '王建民', '王雪颖',
+    '斯洪桥', '贾志洋', '田立年', '张宝', '张德远', '李中岩'
+}
+
+# 课程别名映射（键值均为规范化后的课程名）
+COURSE_ALIAS_MAP = {
+    '大学体育IV（必修项目）': '大学体育IV（乒乓球）',
+    '大学体育IV(必修项目)': '大学体育IV（乒乓球）'
+}
+
+
+def _canonicalize_course_name(name):
+    """规范化课程名并应用别名映射"""
+    name = (name or '').strip()
+    if not name:
+        return ''
+
+    name = re.sub(r'\s+', '', name)
+    name = name.replace('(', '（').replace(')', '）')
+    return COURSE_ALIAS_MAP.get(name, name)
+
+
+def _canonicalize_location(location):
+    """规范化地点文本（不做强制字典校验）"""
+    location = (location or '').strip()
+    if not location:
+        return ''
+
+    location = re.sub(r'\s+', '', location)
+    location = location.replace('教学楼', '楼')
+    location = location.replace('克拉玛依校区校区', '克拉玛依校区')
+    location = location.replace('乒乓馆', '乒乓球馆')
+    return location
+
+
+def _canonicalize_teacher_name(teacher):
+    """按教师标准名单规范化姓名；无法确认则保持原样"""
+    teacher = (teacher or '').strip()
+    if not teacher:
+        return ''
+
+    teacher = re.sub(r'\s+', '', teacher)
+    teacher = re.sub(r'^[^\u4e00-\u9fff]+', '', teacher)
+    teacher = re.sub(r'[^\u4e00-\u9fff]+$', '', teacher)
+
+    if teacher in PDF_TEACHER_STANDARDS:
+        return teacher
+
+    # 常见噪声：前后粘连字符，优先做包含匹配
+    for std in PDF_TEACHER_STANDARDS:
+        if std in teacher or teacher in std:
+            return std
+
+    # 轻量兜底：高度相似且首字一致才替换，避免误伤其他课表
+    best = ''
+    best_ratio = 0.0
+    for std in PDF_TEACHER_STANDARDS:
+        ratio = SequenceMatcher(None, teacher, std).ratio()
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best = std
+
+    if best and best_ratio >= 0.86 and teacher[:1] == best[:1]:
+        return best
+
+    return teacher
+
+
+def _canonicalize_parsed_course(course):
+    """统一规范解析后的课程字段"""
+    return {
+        'course_name': _canonicalize_course_name(course.get('course_name', '')),
+        'location': _canonicalize_location(course.get('location', '')),
+        'teacher': _canonicalize_teacher_name(course.get('teacher', '')),
+        'start_week': course.get('start_week'),
+        'end_week': course.get('end_week'),
+        'period': course.get('period'),
+        'period_end': course.get('period_end'),
+        'day_of_week': course.get('day_of_week')
+    }
+
 def _extract_chinese(text):
     """从交错文本中提取中文字符和中文标点"""
     return ''.join(re.findall(r'[\u4e00-\u9fff\uff08\uff09（）]', text))
@@ -233,6 +317,18 @@ def _extract_course_name_from_text(text):
             # 纯中文行，足够长，可能是课程名片段
             if not any(kw in line for kw in ['克拉玛依', '校区', '机房', '社会实践']):
                 name_parts.append(line)
+        elif re.search(r'[\u4e00-\u9fff]{2,}', line):
+            # 混合行（中英文混排），如 "Web程序设计"、"大学体育IV（必修项目）"
+            # 过滤教师+学号行，避免把姓名误识别为课程名
+            compact_line = line.replace(' ', '')
+            if re.search(r'\(\d{6,}\)', compact_line):
+                continue
+
+            mixed = ''.join(re.findall(r'[A-Za-z]+|[\u4e00-\u9fff\uff08\uff09（）]+', line))
+            chinese_count = len(re.findall(r'[\u4e00-\u9fff]', mixed))
+
+            if chinese_count >= 2 and not any(kw in mixed for kw in ['克拉玛依', '校区', '机房', '周节', '楼区']):
+                name_parts.append(mixed)
 
     course_name = ''.join(name_parts)
 
@@ -247,19 +343,49 @@ def _extract_course_name_from_text(text):
 def _extract_location(text):
     """从文本中提取上课地点"""
     location = ''
+    compact = re.sub(r'\s+', '', text[:400])
+
+    # 优先匹配最完整地点（支持双地点与机房后缀）
+    # 例如: C4楼413/C8楼II区304机房
+    full_dual = re.search(
+        r'(C\d+楼(?:I{1,3}V?|IV|V)?区?\d{3}(?:机房)?(?:/C\d+楼(?:I{1,3}V?|IV|V)?区?\d{3}(?:机房)?)+)',
+        compact
+    )
+    if full_dual:
+        location = full_dual.group(1)
+
+    # 例如: C4楼411/421 或 C4楼II区409/418
+    if not location:
+        same_building_dual = re.search(
+            r'(C\d+楼(?:I{1,3}V?|IV|V)?区?\d{3}(?:/\d{3})+(?:机房)?)',
+            compact
+        )
+        if same_building_dual:
+            location = same_building_dual.group(1)
+
+    # 例如: C6楼II区505机房 / C4楼213
+    if not location:
+        single_full = re.search(r'(C\d+楼(?:I{1,3}V?|IV|V)?区?\d{3}(?:机房)?)', compact)
+        if single_full:
+            location = single_full.group(1)
+
+    # 如果命中校区关键词，尽量保留前缀信息
+    if location and '克拉玛依校区' in compact and not location.startswith('克拉玛依校区'):
+        location = '克拉玛依校区' + location
 
     # 先尝试匹配完整的 "C数字 房间号" 在同一行
-    loc_match = re.search(
-        r'(C\d+)\s*(I{1,3}V?|IV|V)?\s*(区)?[\s\n]*?(\d{3})?',
-        text[:300]
-    )
-    if loc_match:
-        loc_parts = [loc_match.group(1) + '楼']
-        if loc_match.group(2):
-            loc_parts.append(loc_match.group(2) + '区')
-        if loc_match.group(4):
-            loc_parts.append(loc_match.group(4))
-        location = ''.join(loc_parts)
+    if not location:
+        loc_match = re.search(
+            r'(C\d+)\s*(I{1,3}V?|IV|V)?\s*(区)?[\s\n]*?(\d{3})?',
+            text[:300]
+        )
+        if loc_match:
+            loc_parts = [loc_match.group(1) + '楼']
+            if loc_match.group(2):
+                loc_parts.append(loc_match.group(2) + '区')
+            if loc_match.group(4):
+                loc_parts.append(loc_match.group(4))
+            location = ''.join(loc_parts)
 
     # 如果只匹配到楼号没有房间号，在"周 节 楼"标签行之后搜索三位数房间号
     if location and not re.search(r'\d{3}', location):
@@ -284,7 +410,7 @@ def _extract_location(text):
                 location = base.group(1) + area_match.group(1) + '区' + area_match.group(2)
 
     if not location:
-        special = re.search(r'(\d?\s*形体馆|体育馆|操场|实验室)', text[:200])
+        special = re.search(r'(\d?\s*形体馆|体育馆|乒乓球馆|[\u4e00-\u9fff]{1,4}球馆|操场|实验室)', text[:200])
         if special:
             location = special.group(1).replace(' ', '')
 
@@ -302,48 +428,71 @@ def _extract_teacher(text):
     skip_contains = ['工程', '班', '科学', '储运', '勘查', '技术', '思想', '社会',
                      '克拉', '玛依', '校区']
 
+    def normalize_name(name):
+        # 去掉地点词残留（如“房潘啸晨”）
+        name = re.sub(r'^(机房|实验室|楼区|校区|教学楼)+', '', name)
+        name = re.sub(r'^[房区楼馆场校]+', '', name)
+        return name
+
     def is_valid_name(name):
+        name = normalize_name(name)
         if name in skip_words:
             return False
         if any(kw in name for kw in skip_contains):
             return False
-        return True
+        return 2 <= len(name) <= 4
+
+    compact = re.sub(r'\s+', '', text[:400])
+
+    # 优先: 教师名通常紧邻工号/学号括号，选最后一个最可靠
+    id_name_candidates = re.findall(r'([\u4e00-\u9fff]{2,4})\(\d{8,}\)', compact)
+    for candidate in reversed(id_name_candidates):
+        candidate = normalize_name(candidate)
+        if is_valid_name(candidate):
+            return candidate
 
     # 方法0 (优先): 拆分在两行的教师名，如 "楼 赵\n联文" → "赵联文"
     # 中间可能有学号行，如 "楼 赵\n(2024582028)\n联文"
     split_match = re.search(r'[楼区]\s*([\u4e00-\u9fff])\s*\n(?:\s*\([\d\s]+\)\s*\n)?\s*([\u4e00-\u9fff]{1,3})\s*(?:\n|$)', text[:300])
     if split_match:
-        combined = split_match.group(1) + split_match.group(2)
+        combined = normalize_name(split_match.group(1) + split_match.group(2))
         if len(combined) >= 2 and is_valid_name(combined):
             return combined
 
     # 方法1: 独占一行的中文名
     candidates = re.findall(r'(?:^|\n)\s*([\u4e00-\u9fff]{2,4})\s*(?:\n|$)', text[:300])
     for candidate in candidates:
+        candidate = normalize_name(candidate)
         if is_valid_name(candidate):
             return candidate
 
     # 方法2: "机房 教师名" 或 "机房  教师名" 模式
     jf_match = re.search(r'机房\s+([\u4e00-\u9fff]{2,4})', text[:300])
-    if jf_match and is_valid_name(jf_match.group(1)):
-        return jf_match.group(1)
+    if jf_match:
+        candidate = normalize_name(jf_match.group(1))
+        if is_valid_name(candidate):
+            return candidate
 
     # 方法3: ")教师名" 模式
     id_name_match = re.search(r'\)\s*([\u4e00-\u9fff]{2,4})\s*(?:\n|$)', text[:300])
-    if id_name_match and is_valid_name(id_name_match.group(1)):
-        return id_name_match.group(1)
+    if id_name_match:
+        candidate = normalize_name(id_name_match.group(1))
+        if is_valid_name(candidate):
+            return candidate
 
     # 方法4: "区 教师名" 模式
     qu_match = re.search(r'区\s+([\u4e00-\u9fff]{2,4})\s*(?:\n|$)', text[:300])
-    if qu_match and is_valid_name(qu_match.group(1)):
-        return qu_match.group(1)
+    if qu_match:
+        candidate = normalize_name(qu_match.group(1))
+        if is_valid_name(candidate):
+            return candidate
 
     # 方法5: 从学号+教师名混排中提取，如 "(202机05房92 2 李12张) 美智"
     # 提取括号内和括号后的所有中文字符
     paren_match = re.search(r'\([\d\s\u4e00-\u9fff]+\)\s*([\u4e00-\u9fff]*)', text[:300])
     if paren_match:
         inside = re.findall(r'[\u4e00-\u9fff]', paren_match.group(0))
-        inside_str = ''.join(inside)
+        inside_str = normalize_name(''.join(inside))
         # 移除已知非人名词汇
         inside_str = inside_str.replace('机房', '')
         if len(inside_str) >= 2 and is_valid_name(inside_str):
@@ -356,7 +505,8 @@ def _parse_cell(cell_text):
     """解析课表表格中的单个单元格，提取所有课程信息"""
     results = []
 
-    wp_pattern = r'\((\d+)~(\d+)\s*\)\s*\((\d+)-(\d+)\s*\)'
+    # 兼容变体: (1~12周) (1-2节)、(1~12��) (1-2��) 等
+    wp_pattern = r'\((\d+)\s*~\s*(\d+)[^)]*\)\s*\((\d+)\s*-\s*(\d+)[^)]*\)'
     matches = list(re.finditer(wp_pattern, cell_text))
 
     if not matches:
@@ -447,6 +597,6 @@ def parse_schedule_pdf(pdf_path):
             cell_courses = _parse_cell(cell)
             for c in cell_courses:
                 c['day_of_week'] = day_of_week
-                courses.append(c)
+                courses.append(_canonicalize_parsed_course(c))
 
     return courses
